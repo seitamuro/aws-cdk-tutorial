@@ -1,4 +1,10 @@
-import { aws_apigateway, aws_lambda_nodejs, Duration } from "aws-cdk-lib";
+import {
+  aws_apigateway,
+  aws_iam,
+  aws_lambda_nodejs,
+  aws_s3,
+  Duration,
+} from "aws-cdk-lib";
 import { Runtime } from "aws-cdk-lib/aws-lambda";
 import { Construct } from "constructs";
 
@@ -36,6 +42,69 @@ export class HelloWorld extends Construct {
     restApiHelloWorld.addMethod(
       "GET",
       new aws_apigateway.LambdaIntegration(registerTaskFunc)
+    );
+
+    const nameBucket = "MyFirstBucket";
+    const iamRoleForLambdaWriter = new aws_iam.Role(this, "LambdaWriterRole", {
+      assumedBy: new aws_iam.ServicePrincipal("lambda.amazonaws.com"),
+    });
+    const iamRoleForLambdaReader = new aws_iam.Role(this, "LambdaReaderRole", {
+      assumedBy: new aws_iam.ServicePrincipal("lambda.amazonaws.com"),
+    });
+    const bucket = new aws_s3.Bucket(this, nameBucket);
+    bucket.addToResourcePolicy(
+      new aws_iam.PolicyStatement({
+        effect: aws_iam.Effect.ALLOW,
+        actions: ["s3:PutObject"],
+        resources: [bucket.bucketArn + "/*"],
+        principals: [iamRoleForLambdaWriter],
+      })
+    );
+    bucket.addToResourcePolicy(
+      new aws_iam.PolicyStatement({
+        effect: aws_iam.Effect.ALLOW,
+        actions: ["s3:GetObject"],
+        resources: [bucket.bucketArn + "/*"],
+        principals: [iamRoleForLambdaReader],
+      })
+    );
+
+    const registerTaskFuncUploadToS3 = new aws_lambda_nodejs.NodejsFunction(
+      this,
+      "UploadToS3",
+      {
+        runtime: Runtime.NODEJS_20_X,
+        entry: "src/lambda/upload-to-s3.ts",
+        handler: "handler",
+        environment: {
+          S3_BUCKET_NAME: bucket.bucketName,
+        },
+        role: iamRoleForLambdaWriter,
+      }
+    );
+    const restApiUploadToS3 = restApi.root.addResource("upload_to_s3");
+    restApiUploadToS3.addMethod(
+      "POST",
+      new aws_apigateway.LambdaIntegration(registerTaskFuncUploadToS3)
+    );
+
+    const registerTaskFuncReadFromS3 = new aws_lambda_nodejs.NodejsFunction(
+      this,
+      "ReadFromS3",
+      {
+        runtime: Runtime.NODEJS_20_X,
+        entry: "src/lambda/read-from-s3.ts",
+        handler: "handler",
+        environment: {
+          S3_BUCKET_NAME: bucket.bucketName,
+        },
+        role: iamRoleForLambdaReader,
+      }
+    );
+    const restApiReadFromS3 = restApi.root.addResource("read_from_s3");
+    restApiReadFromS3.addMethod(
+      "GET",
+      new aws_apigateway.LambdaIntegration(registerTaskFuncReadFromS3)
     );
   }
 }
